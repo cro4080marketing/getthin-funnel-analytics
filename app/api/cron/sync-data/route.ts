@@ -105,14 +105,25 @@ export async function GET(request: NextRequest) {
       continues: number;
     }>();
 
+    // Helper function to check if entry completed a purchase
+    const hasCompletedPurchase = (pageViews: EmbeddablesEntry['page_views']) => {
+      if (!pageViews || pageViews.length === 0) return false;
+      // Check if any page_key indicates payment completion
+      return pageViews.some(pv =>
+        pv.page_key === 'payment_successful' ||
+        pv.page_key === 'async_confirmation_to_redirect' ||
+        pv.page_key.toLowerCase().includes('payment_successful') ||
+        pv.page_key.toLowerCase().includes('confirmation_to_redirect')
+      );
+    };
+
     for (const entry of entries) {
-      // Determine if entry is completed (has many page views or specific completion marker)
+      // Determine if entry completed a purchase
       const pageViews = entry.page_views || [];
       const maxPageIndex = pageViews.length > 0
         ? Math.max(...pageViews.map(pv => pv.page_index))
         : 0;
-      // Step 38 = macro_checkout (first checkout), step 41 = confirmation
-      const isCompleted = maxPageIndex >= 38;
+      const isCompleted = hasCompletedPurchase(pageViews);
 
       // Upsert entry
       await prisma.funnelEntry.upsert({
@@ -235,10 +246,7 @@ export async function GET(request: NextRequest) {
 
     // Calculate and store funnel analytics
     const totalStarts = entries.length;
-    const totalCompletions = entries.filter(e => {
-      const maxIdx = e.page_views?.length ? Math.max(...e.page_views.map(pv => pv.page_index)) : 0;
-      return maxIdx >= 10;
-    }).length;
+    const totalCompletions = entries.filter(e => hasCompletedPurchase(e.page_views)).length;
     const funnelConversionRate = totalStarts > 0 ? (totalCompletions / totalStarts) * 100 : 0;
 
     const existingFunnelAnalytics = await prisma.funnelAnalytics.findFirst({
