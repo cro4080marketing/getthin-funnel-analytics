@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db/prisma';
+import prisma from '@/lib/db/prisma';
 import { fetchFunnels, fetchFunnelAnalytics } from '@/lib/integrations/embeddables';
 import { startOfDay, endOfDay, subDays } from 'date-fns';
 
