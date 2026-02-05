@@ -68,8 +68,14 @@ export default function DashboardPage() {
     setError(null);
 
     try {
-      // Fetch analytics from Embeddables
-      const analyticsRes = await fetch('/api/funnels/analytics?limit=1000');
+      // Calculate days from date range for API
+      const daysDiff = Math.ceil(
+        (dateRange.endDate.getTime() - dateRange.startDate.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      const days = Math.max(1, daysDiff);
+
+      // Fetch analytics with date range
+      const analyticsRes = await fetch(`/api/funnels/analytics?days=${days}`);
       if (!analyticsRes.ok) {
         throw new Error('Failed to fetch analytics');
       }
