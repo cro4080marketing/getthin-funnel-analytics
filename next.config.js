@@ -1,11 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'standalone',
   reactStrictMode: true,
-  // Disable static optimization for all pages
-  experimental: {
-    isrMemoryCacheSize: 0,
-  },
+  // No output mode - let it run as a normal dynamic Next.js app
 }
 
 module.exports = nextConfig
