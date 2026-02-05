@@ -1,13 +1,10 @@
 /**
  * Slack Integration
- * 
+ *
  * Handles sending alerts and daily reports to Slack via webhook
  */
 
-import { Alert } from '@/types/alert';
-
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
-const SLACK_CHANNEL = process.env.SLACK_CHANNEL || '#funnel-alerts';
 
 interface SlackMessage {
   text?: string;
@@ -15,12 +12,28 @@ interface SlackMessage {
   channel?: string;
 }
 
+interface AlertData {
+  id?: string;
+  funnelId: string;
+  funnelName: string;
+  stepNumber?: number | null;
+  stepName?: string | null;
+  severity: 'critical' | 'warning' | 'info';
+  type: string;
+  currentValue: number;
+  previousDayValue?: number | null;
+  sevenDayAverage?: number | null;
+  percentageChange: number;
+  message: string;
+  recommendation?: string | null;
+}
+
 /**
  * Send message to Slack
  */
 async function sendSlackMessage(message: SlackMessage): Promise<boolean> {
   if (!SLACK_WEBHOOK_URL) {
-    console.warn('SLACK_WEBHOOK_URL not configured, skipping Slack notification');
+    console.warn('[Slack] SLACK_WEBHOOK_URL not configured, skipping notification');
     return false;
   }
 
@@ -39,7 +52,7 @@ async function sendSlackMessage(message: SlackMessage): Promise<boolean> {
 
     return true;
   } catch (error) {
-    console.error('Error sending Slack message:', error);
+    console.error('[Slack] Error sending message:', error);
     return false;
   }
 }
@@ -47,21 +60,31 @@ async function sendSlackMessage(message: SlackMessage): Promise<boolean> {
 /**
  * Format and send alert to Slack
  */
-export async function sendAlertToSlack(alert: Alert): Promise<boolean> {
-  const emoji = alert.severity === 'critical' ? '🚨' : alert.severity === 'warning' ? '⚠️' : 'ℹ️';
+export async function sendAlertToSlack(alert: AlertData): Promise<boolean> {
+  const emoji =
+    alert.severity === 'critical' ? '🚨' : alert.severity === 'warning' ? '⚠️' : 'ℹ️';
   const severityText = alert.severity.toUpperCase();
-  
+
   // Calculate estimated impact
-  const additionalDropoffs = Math.round((alert.currentValue - alert.previousDayValue) * 100);
+  const previousValue = alert.previousDayValue || 0;
+  const additionalDropoffs = Math.round(Math.abs(alert.currentValue - previousValue) * 10);
   const estimatedRevenue = additionalDropoffs * 30; // Assuming $30 avg customer value
-  
+
   const message: SlackMessage = {
     blocks: [
       {
         type: 'header',
         text: {
           type: 'plain_text',
-          text: `${emoji} ${severityText} ALERT: ${alert.message}`,
+          text: `${emoji} ${severityText} ALERT`,
+          emoji: true,
+        },
+      },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*${alert.message}*`,
         },
       },
       {
@@ -73,7 +96,9 @@ export async function sendAlertToSlack(alert: Alert): Promise<boolean> {
           },
           {
             type: 'mrkdwn',
-            text: alert.stepName ? `*Step:*\nStep ${alert.stepNumber} - ${alert.stepName}` : '*Type:*\nOverall Funnel',
+            text: alert.stepName
+              ? `*Step:*\nStep ${alert.stepNumber} - ${alert.stepName}`
+              : '*Type:*\nOverall Funnel',
           },
         ],
       },
@@ -81,14 +106,14 @@ export async function sendAlertToSlack(alert: Alert): Promise<boolean> {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*📊 Metrics:*\n• Current: ${(alert.currentValue * 100).toFixed(1)}%\n• Previous day: ${(alert.previousDayValue * 100).toFixed(1)}%\n• 7-day average: ${(alert.sevenDayAverage * 100).toFixed(1)}%\n• Change: ${alert.percentageChange > 0 ? '+' : ''}${alert.percentageChange.toFixed(1)}% vs yesterday`,
+          text: `*📊 Metrics:*\n• Current: ${alert.currentValue.toFixed(1)}%\n• Previous day: ${previousValue.toFixed(1)}%\n• 7-day average: ${(alert.sevenDayAverage || 0).toFixed(1)}%\n• Change: ${alert.percentageChange > 0 ? '+' : ''}${alert.percentageChange.toFixed(1)}%`,
         },
       },
       {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*⚠️ Impact:*\n• ~${additionalDropoffs} additional users dropping\n• Estimated revenue impact: $${estimatedRevenue.toLocaleString()}`,
+          text: `*⚠️ Estimated Impact:*\n• ~${additionalDropoffs} additional users affected\n• Potential revenue impact: $${estimatedRevenue.toLocaleString()}`,
         },
       },
     ],
@@ -104,6 +129,8 @@ export async function sendAlertToSlack(alert: Alert): Promise<boolean> {
     });
   }
 
+  const dashboardUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+
   message.blocks?.push({
     type: 'actions',
     elements: [
@@ -112,19 +139,15 @@ export async function sendAlertToSlack(alert: Alert): Promise<boolean> {
         text: {
           type: 'plain_text',
           text: 'View Dashboard',
+          emoji: true,
         },
-        url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/${alert.funnelId}?step=${alert.stepNumber || 'all'}`,
-      },
-      {
-        type: 'button',
-        text: {
-          type: 'plain_text',
-          text: 'Acknowledge Alert',
-        },
-        url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/alerts?id=${alert.id}`,
-        style: 'primary',
+        url: `${dashboardUrl}/dashboard`,
       },
     ],
+  });
+
+  message.blocks?.push({
+    type: 'divider',
   });
 
   return sendSlackMessage(message);
@@ -133,9 +156,32 @@ export async function sendAlertToSlack(alert: Alert): Promise<boolean> {
 /**
  * Format and send daily report to Slack
  */
-export async function sendDailyReportToSlack(report: any): Promise<boolean> {
-  const trendEmoji = report.overallConversionTrend > 0 ? '📈' : report.overallConversionTrend < 0 ? '📉' : '➡️';
-  
+export async function sendDailyReportToSlack(report: {
+  funnelName: string;
+  reportDate: string;
+  overallConversionRate: number;
+  overallConversionTrend: number;
+  totalFunnelStarts: number;
+  totalFunnelStartsTrend: number;
+  topPerformingSteps?: Array<{
+    stepNumber: number;
+    stepName: string;
+    conversionRate: number;
+  }>;
+  underperformingSteps?: Array<{
+    stepNumber: number;
+    stepName: string;
+    dropoffRate: number;
+  }>;
+  aiSummary?: string;
+}): Promise<boolean> {
+  const trendEmoji =
+    report.overallConversionTrend > 0
+      ? '📈'
+      : report.overallConversionTrend < 0
+      ? '📉'
+      : '➡️';
+
   const message: SlackMessage = {
     blocks: [
       {
@@ -143,6 +189,7 @@ export async function sendDailyReportToSlack(report: any): Promise<boolean> {
         text: {
           type: 'plain_text',
           text: `📊 Daily Funnel Report - ${new Date(report.reportDate).toLocaleDateString()}`,
+          emoji: true,
         },
       },
       {
@@ -157,7 +204,7 @@ export async function sendDailyReportToSlack(report: any): Promise<boolean> {
         fields: [
           {
             type: 'mrkdwn',
-            text: `*Overall Conversion:*\n${(report.overallConversionRate * 100).toFixed(1)}% ${trendEmoji} ${report.overallConversionTrend > 0 ? '+' : ''}${report.overallConversionTrend.toFixed(1)}%`,
+            text: `*Overall Conversion:*\n${report.overallConversionRate.toFixed(1)}% ${trendEmoji} ${report.overallConversionTrend > 0 ? '+' : ''}${report.overallConversionTrend.toFixed(1)}%`,
           },
           {
             type: 'mrkdwn',
@@ -171,9 +218,12 @@ export async function sendDailyReportToSlack(report: any): Promise<boolean> {
   // Add top performing steps
   if (report.topPerformingSteps && report.topPerformingSteps.length > 0) {
     const topSteps = report.topPerformingSteps
-      .map((step: any) => `• Step ${step.stepNumber}: ${step.stepName} (${(step.conversionRate * 100).toFixed(1)}%)`)
+      .map(
+        (step) =>
+          `• Step ${step.stepNumber}: ${step.stepName} (${step.conversionRate.toFixed(1)}%)`
+      )
       .join('\n');
-    
+
     message.blocks?.push({
       type: 'section',
       text: {
@@ -186,9 +236,12 @@ export async function sendDailyReportToSlack(report: any): Promise<boolean> {
   // Add underperforming steps
   if (report.underperformingSteps && report.underperformingSteps.length > 0) {
     const underSteps = report.underperformingSteps
-      .map((step: any) => `• Step ${step.stepNumber}: ${step.stepName} (${(step.dropoffRate * 100).toFixed(1)}% drop-off)`)
+      .map(
+        (step) =>
+          `• Step ${step.stepNumber}: ${step.stepName} (${step.dropoffRate.toFixed(1)}% drop-off)`
+      )
       .join('\n');
-    
+
     message.blocks?.push({
       type: 'section',
       text: {
@@ -209,6 +262,8 @@ export async function sendDailyReportToSlack(report: any): Promise<boolean> {
     });
   }
 
+  const dashboardUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+
   message.blocks?.push({
     type: 'actions',
     elements: [
@@ -217,8 +272,9 @@ export async function sendDailyReportToSlack(report: any): Promise<boolean> {
         text: {
           type: 'plain_text',
           text: 'View Full Dashboard',
+          emoji: true,
         },
-        url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard`,
+        url: `${dashboardUrl}/dashboard`,
       },
     ],
   });

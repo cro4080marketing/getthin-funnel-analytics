@@ -7,36 +7,249 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model FunnelStep {
+// Core funnel definition
+model Funnel {
   id            String   @id @default(cuid())
-  stepIndex     Int
-  stepKey       String
-  stepName      String
-  totalViews    Int      @default(0)
-  totalDropoffs Int      @default(0)
-  totalCompletes Int     @default(0)
-  conversionRate Float   @default(0)
-  avgTimeSpent  Float    @default(0) // in seconds
-  date          DateTime @default(now())
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  embeddablesId String   @unique @map("embeddables_id")
+  name          String
+  description   String?
+  totalSteps    Int      @map("total_steps")
+  status        String   @default("active") // active, paused, archived
+  metadata      Json?    // additional funnel configuration
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
-  @@unique([stepIndex, date])
-  @@index([date])
+  // Relations
+  steps           FunnelStep[]
+  analytics       FunnelAnalytics[]
+  alerts          Alert[]
+  dailyReports    DailyReport[]
+  recommendations TestRecommendation[]
+
+  @@map("funnels")
 }
 
+// Individual steps within a funnel
+model FunnelStep {
+  id         String   @id @default(cuid())
+  funnelId   String   @map("funnel_id")
+  stepNumber Int      @map("step_number")
+  stepName   String   @map("step_name")
+  stepKey    String?  @map("step_key")
+  stepType   String?  @map("step_type") // form, info, confirmation
+  fields     Json?    // array of form fields if applicable
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  funnel    Funnel            @relation(fields: [funnelId], references: [id], onDelete: Cascade)
+  analytics StepAnalytics[]
+
+  @@unique([funnelId, stepNumber])
+  @@map("funnel_steps")
+}
+
+// Time-series analytics data for entire funnel
+model FunnelAnalytics {
+  id              String   @id @default(cuid())
+  funnelId        String   @map("funnel_id")
+  date            DateTime @db.Date
+  hour            Int?     // 0-23 for hourly granularity, null for daily
+
+  // Metrics
+  totalStarts     Int      @default(0) @map("total_starts")
+  totalCompletions Int     @default(0) @map("total_completions")
+  totalDropoffs   Int      @default(0) @map("total_dropoffs")
+  conversionRate  Float    @default(0) @map("conversion_rate")
+
+  // Device/Browser segmentation (null = all)
+  deviceType      String?  @map("device_type") // desktop, mobile, tablet
+  browser         String?  // chrome, safari, firefox
+
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // Relations
+  funnel Funnel @relation(fields: [funnelId], references: [id], onDelete: Cascade)
+
+  @@unique([funnelId, date, hour, deviceType, browser])
+  @@index([funnelId, date(sort: Desc)])
+  @@map("funnel_analytics")
+}
+
+// Step-level analytics
+model StepAnalytics {
+  id              String   @id @default(cuid())
+  stepId          String   @map("step_id")
+  date            DateTime @db.Date
+  hour            Int?     // 0-23 for hourly granularity
+
+  // Metrics
+  entries         Int      @default(0)
+  exits           Int      @default(0)
+  conversions     Int      @default(0) // continued to next step
+  dropOffRate     Float    @default(0) @map("drop_off_rate")
+  conversionRate  Float    @default(0) @map("conversion_rate")
+
+  // Time metrics
+  avgTimeOnStep   Int?     @map("avg_time_on_step") // seconds
+  medianTimeOnStep Int?    @map("median_time_on_step")
+
+  // Segmentation
+  deviceType      String?  @map("device_type")
+  browser         String?
+
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // Relations
+  step FunnelStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+
+  @@unique([stepId, date, hour, deviceType, browser])
+  @@index([stepId, date(sort: Desc)])
+  @@map("step_analytics")
+}
+
+// Alerts for anomaly detection
+model Alert {
+  id               String    @id @default(cuid())
+  funnelId         String    @map("funnel_id")
+  stepNumber       Int?      @map("step_number")
+
+  severity         String    // critical, warning, info
+  type             String    // drop_off, conversion, volume, step_anomaly
+
+  // Metrics
+  currentValue     Float     @map("current_value")
+  previousDayValue Float?    @map("previous_day_value")
+  sevenDayAverage  Float?    @map("seven_day_average")
+  percentageChange Float?    @map("percentage_change")
+
+  // Context
+  message          String
+  recommendation   String?
+
+  // Status
+  status           String    @default("active") // active, acknowledged, resolved
+  acknowledgedBy   String?   @map("acknowledged_by")
+  acknowledgedAt   DateTime? @map("acknowledged_at")
+  resolvedAt       DateTime? @map("resolved_at")
+
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  funnel Funnel @relation(fields: [funnelId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([funnelId, createdAt(sort: Desc)])
+  @@map("alerts")
+}
+
+// Daily reports
+model DailyReport {
+  id                   String   @id @default(cuid())
+  funnelId             String   @map("funnel_id")
+  reportDate           DateTime @db.Date @map("report_date")
+
+  // Summary metrics
+  totalStarts          Int?     @map("total_starts")
+  totalCompletions     Int?     @map("total_completions")
+  overallConversionRate Float?  @map("overall_conversion_rate")
+
+  // AI Analysis
+  aiSummary            String?  @map("ai_summary") @db.Text
+  mainBlockers         Json?    @map("main_blockers") // array of identified blockers
+  insights             Json?    // array of insights and patterns
+
+  // Step-by-step data
+  stepData             Json?    @map("step_data") // detailed metrics for each step
+
+  // Metadata
+  sentToSlack          Boolean  @default(false) @map("sent_to_slack")
+  slackTimestamp       String?  @map("slack_timestamp")
+
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  // Relations
+  funnel Funnel @relation(fields: [funnelId], references: [id], onDelete: Cascade)
+
+  @@unique([funnelId, reportDate])
+  @@index([reportDate(sort: Desc)])
+  @@map("daily_reports")
+}
+
+// AI-generated test recommendations
+model TestRecommendation {
+  id                       String    @id @default(cuid())
+  funnelId                 String    @map("funnel_id")
+
+  // Test details
+  title                    String
+  hypothesis               String    @db.Text
+  priority                 String    // high, medium, low
+  testType                 String    @map("test_type") // copy, design, flow, validation, timing
+  targetStep               Int?      @map("target_step")
+
+  // Expected impact
+  estimatedImpact          Json?     @map("estimated_impact") // {metric, currentValue, expectedValue, improvement, confidence}
+
+  // Implementation details
+  controlDescription       String?   @map("control_description") @db.Text
+  variantDescription       String?   @map("variant_description") @db.Text
+  implementationComplexity String?   @map("implementation_complexity") // low, medium, high
+  estimatedEffort          String?   @map("estimated_effort")
+  requiredTools            String[]  @map("required_tools")
+
+  // Supporting data
+  dataInsights             Json?     @map("data_insights") // array of insights
+
+  // Status
+  status                   String    @default("suggested") // suggested, approved, in_progress, completed, rejected
+  implementedAt            DateTime? @map("implemented_at")
+  results                  Json?     // A/B test results if completed
+
+  createdAt                DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  funnel Funnel @relation(fields: [funnelId], references: [id], onDelete: Cascade)
+
+  @@index([status, priority])
+  @@index([funnelId, createdAt(sort: Desc)])
+  @@map("test_recommendations")
+}
+
+// Individual user journey entries (from Embeddables)
 model FunnelEntry {
   id            String   @id @default(cuid())
-  entryId       String   @unique
-  flowId        String
-  lastStepIndex Int
-  lastStepKey   String
+  entryId       String   @unique @map("entry_id")
+  funnelId      String   @map("funnel_id")
+  lastStepIndex Int      @map("last_step_index")
+  lastStepKey   String?  @map("last_step_key")
   completed     Boolean  @default(false)
-  totalSteps    Int
-  timeSpent     Int      // total time in seconds
-  createdAt     DateTime
-  updatedAt     DateTime
+  totalSteps    Int      @map("total_steps")
+  timeSpent     Int      @map("time_spent") // total time in seconds
 
-  @@index([createdAt])
+  // Additional tracking
+  deviceType    String?  @map("device_type")
+  browser       String?
+
+  createdAt     DateTime @map("created_at")
+  updatedAt     DateTime @map("updated_at")
+
+  @@index([funnelId, createdAt(sort: Desc)])
   @@index([completed])
+  @@map("funnel_entries")
+}
+
+// Sync log for tracking data imports
+model SyncLog {
+  id           String   @id @default(cuid())
+  syncType     String   @map("sync_type") // full, incremental, alerts
+  status       String   // success, failed, partial
+  recordsProcessed Int  @map("records_processed")
+  errorMessage String?  @map("error_message") @db.Text
+  startedAt    DateTime @map("started_at")
+  completedAt  DateTime? @map("completed_at")
+
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([syncType, startedAt(sort: Desc)])
+  @@map("sync_logs")
 }
