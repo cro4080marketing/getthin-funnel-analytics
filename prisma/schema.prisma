@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,239 +7,36 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Funnel {
-  id                String             @id @default(cuid())
-  embeddablesId     String             @unique // Embeddables funnel ID
-  name              String
-  description       String?
-  totalSteps        Int
-  status            String             @default("active") // active, paused, archived
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  lastSyncedAt      DateTime?
-  
-  steps             FunnelStep[]
-  analytics         FunnelAnalytics[]
-  alerts            Alert[]
-  dailyReports      DailyReport[]
-  recommendations   Recommendation[]
-  
-  @@index([embeddablesId])
-  @@index([status])
-}
-
 model FunnelStep {
-  id            String    @id @default(cuid())
-  funnelId      String
-  stepNumber    Int
+  id            String   @id @default(cuid())
+  stepIndex     Int
+  stepKey       String
   stepName      String
-  stepType      String?   // question, form, result, etc.
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  
-  funnel        Funnel    @relation(fields: [funnelId], references: [id], onDelete: Cascade)
-  analytics     StepAnalytics[]
-  
-  @@unique([funnelId, stepNumber])
-  @@index([funnelId])
-}
+  totalViews    Int      @default(0)
+  totalDropoffs Int      @default(0)
+  totalCompletes Int     @default(0)
+  conversionRate Float   @default(0)
+  avgTimeSpent  Float    @default(0) // in seconds
+  date          DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-model FunnelAnalytics {
-  id                    String    @id @default(cuid())
-  funnelId              String
-  date                  DateTime  @db.Date
-  hour                  Int?      // 0-23 for hourly granularity
-  
-  // Volume metrics
-  totalStarts           Int
-  totalCompletions      Int
-  totalDropoffs         Int
-  
-  // Conversion metrics
-  overallConversionRate Float
-  averageDropoffRate    Float
-  
-  // Time metrics
-  averageCompletionTime Int?      // seconds
-  medianCompletionTime  Int?      // seconds
-  
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
-  
-  funnel                Funnel    @relation(fields: [funnelId], references: [id], onDelete: Cascade)
-  
-  @@unique([funnelId, date, hour])
-  @@index([funnelId, date])
+  @@unique([stepIndex, date])
   @@index([date])
 }
 
-model StepAnalytics {
-  id                    String      @id @default(cuid())
-  stepId                String
-  date                  DateTime    @db.Date
-  hour                  Int?        // 0-23 for hourly granularity
-  
-  // Volume metrics
-  totalEntries          Int
-  totalExits            Int
-  totalContinues        Int
-  
-  // Conversion metrics
-  dropoffRate           Float
-  conversionRate        Float
-  
-  // Time metrics
-  averageTimeOnStep     Int?        // seconds
-  medianTimeOnStep      Int?        // seconds
-  
-  createdAt             DateTime    @default(now())
-  updatedAt             DateTime    @updatedAt
-  
-  step                  FunnelStep  @relation(fields: [stepId], references: [id], onDelete: Cascade)
-  
-  @@unique([stepId, date, hour])
-  @@index([stepId, date])
-  @@index([date])
-}
+model FunnelEntry {
+  id            String   @id @default(cuid())
+  entryId       String   @unique
+  flowId        String
+  lastStepIndex Int
+  lastStepKey   String
+  completed     Boolean  @default(false)
+  totalSteps    Int
+  timeSpent     Int      // total time in seconds
+  createdAt     DateTime
+  updatedAt     DateTime
 
-model Alert {
-  id                  String    @id @default(cuid())
-  funnelId            String
-  funnelName          String
-  severity            String    // critical, warning, info
-  type                String    // drop_off, conversion, volume, step_anomaly
-  
-  // Step context (optional)
-  stepNumber          Int?
-  stepName            String?
-  
-  // Metrics
-  currentValue        Float
-  previousDayValue    Float
-  sevenDayAverage     Float
-  percentageChange    Float
-  
-  // Context
-  message             String
-  recommendation      String?
-  
-  // Status
-  status              String    @default("active") // active, acknowledged, resolved
-  acknowledgedBy      String?
-  acknowledgedAt      DateTime?
-  resolvedAt          DateTime?
-  
-  // Slack notification
-  slackMessageTs      String?   // Slack message timestamp for thread replies
-  slackSent           Boolean   @default(false)
-  
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-  
-  funnel              Funnel    @relation(fields: [funnelId], references: [id], onDelete: Cascade)
-  
-  @@index([funnelId, status])
   @@index([createdAt])
-  @@index([severity, status])
-}
-
-model DailyReport {
-  id                        String    @id @default(cuid())
-  funnelId                  String
-  reportDate                DateTime  @db.Date
-  
-  // Executive summary
-  overallConversionRate     Float
-  overallConversionTrend    Float     // % change vs previous day
-  totalFunnelStarts         Int
-  totalFunnelStartsTrend    Float     // % change vs previous day
-  
-  // Performance highlights
-  topPerformingSteps        Json      // Array of step summaries
-  underperformingSteps      Json      // Array of step summaries
-  criticalIssues            Json      // Array of issue descriptions
-  
-  // AI analysis
-  aiSummary                 String?
-  aiRecommendations         Json?     // Array of recommendations
-  
-  // Slack delivery
-  slackSent                 Boolean   @default(false)
-  slackMessageTs            String?
-  slackSentAt               DateTime?
-  
-  createdAt                 DateTime  @default(now())
-  updatedAt                 DateTime  @updatedAt
-  
-  funnel                    Funnel    @relation(fields: [funnelId], references: [id], onDelete: Cascade)
-  
-  @@unique([funnelId, reportDate])
-  @@index([funnelId, reportDate])
-  @@index([reportDate])
-}
-
-model Recommendation {
-  id                String    @id @default(cuid())
-  funnelId          String
-  type              String    // ui_optimization, copy_change, flow_modification, technical_fix
-  priority          String    // high, medium, low
-  
-  // Recommendation details
-  title             String
-  description       String
-  reasoning         String
-  expectedImpact    String?
-  
-  // Implementation
-  implementationSteps String?
-  estimatedEffort   String?   // hours or story points
-  
-  // Context
-  stepNumber        Int?
-  relatedMetrics    Json?
-  
-  // Status
-  status            String    @default("pending") // pending, approved, rejected, implemented
-  approvedBy        String?
-  approvedAt        DateTime?
-  implementedAt     DateTime?
-  
-  // AI generation
-  generatedBy       String    @default("ai") // ai, manual
-  aiModel           String?
-  aiPromptVersion   String?
-  
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  
-  funnel            Funnel    @relation(fields: [funnelId], references: [id], onDelete: Cascade)
-  
-  @@index([funnelId, status])
-  @@index([priority, status])
-  @@index([createdAt])
-}
-
-model SyncLog {
-  id                String    @id @default(cuid())
-  syncType          String    // embeddables_fetch, alert_check, daily_report
-  status            String    // success, failure, partial
-  
-  // Execution details
-  startedAt         DateTime
-  completedAt       DateTime?
-  duration          Int?      // milliseconds
-  
-  // Results
-  recordsProcessed  Int?
-  recordsFailed     Int?
-  errorMessage      String?
-  errorStack        String?
-  
-  // Metadata
-  metadata          Json?     // Additional context
-  
-  createdAt         DateTime  @default(now())
-  
-  @@index([syncType, status])
-  @@index([createdAt])
+  @@index([completed])
 }
