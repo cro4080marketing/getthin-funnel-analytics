@@ -7,7 +7,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/db/prisma';
-import { startOfDay } from 'date-fns';
 import { FUNNEL_PAGES, isPurchaseComplete } from '@/lib/funnel-pages';
 
 export const runtime = 'nodejs';
@@ -183,8 +182,9 @@ export async function GET(request: NextRequest) {
     }>();
 
     for (const entry of entries) {
-      // Use entry's created_at date for analytics
-      const entryDate = startOfDay(new Date(entry.created_at));
+      // Use entry's created_at date for analytics (UTC midnight, timezone-independent)
+      const d = new Date(entry.created_at);
+      const entryDate = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
       const dateKey = entryDate.toISOString();
 
       // Initialize daily maps if needed
@@ -279,10 +279,23 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Create/update step analytics PER DAY
+    // Write step analytics PER DAY
+    // Delete all existing analytics for each date first to clear stale data
+    // (e.g., from previous syncs before embeddable_id filtering was added)
+    const stepIds = steps.map(s => s.id);
     let stepsProcessed = 0;
+
     for (const [dateKey, dailySteps] of dailyStepData) {
       const analyticsDate = new Date(dateKey);
+
+      // Delete ALL existing step analytics for this date to prevent stale duplicates
+      await prisma.stepAnalytics.deleteMany({
+        where: {
+          stepId: { in: stepIds },
+          date: analyticsDate,
+          hour: null,
+        },
+      });
 
       for (const [pageKey, data] of dailySteps) {
         const stepId = stepKeyToId.get(pageKey);
@@ -291,39 +304,18 @@ export async function GET(request: NextRequest) {
         const dropOffRate = data.views > 0 ? (data.exits / data.views) * 100 : 0;
         const conversionRate = data.views > 0 ? (data.continues / data.views) * 100 : 0;
 
-        const existingAnalytics = await prisma.stepAnalytics.findFirst({
-          where: {
+        await prisma.stepAnalytics.create({
+          data: {
             stepId,
             date: analyticsDate,
-            hour: null,
+            entries: data.views,
+            exits: data.exits,
+            conversions: data.continues,
+            dropOffRate,
+            conversionRate,
+            avgTimeOnStep: 0,
           },
         });
-
-        if (existingAnalytics) {
-          await prisma.stepAnalytics.update({
-            where: { id: existingAnalytics.id },
-            data: {
-              entries: data.views,
-              exits: data.exits,
-              conversions: data.continues,
-              dropOffRate,
-              conversionRate,
-            },
-          });
-        } else {
-          await prisma.stepAnalytics.create({
-            data: {
-              stepId,
-              date: analyticsDate,
-              entries: data.views,
-              exits: data.exits,
-              conversions: data.continues,
-              dropOffRate,
-              conversionRate,
-              avgTimeOnStep: 0,
-            },
-          });
-        }
 
         stepsProcessed++;
       }
@@ -340,7 +332,8 @@ export async function GET(request: NextRequest) {
         ? (dailyFunnel.completions / dailyFunnel.starts) * 100
         : 0;
 
-      const existingFunnelAnalytics = await prisma.funnelAnalytics.findFirst({
+      // Delete existing funnel analytics for this date to clear stale data
+      await prisma.funnelAnalytics.deleteMany({
         where: {
           funnelId: funnel.id,
           date: analyticsDate,
@@ -348,28 +341,16 @@ export async function GET(request: NextRequest) {
         },
       });
 
-      if (existingFunnelAnalytics) {
-        await prisma.funnelAnalytics.update({
-          where: { id: existingFunnelAnalytics.id },
-          data: {
-            totalStarts: dailyFunnel.starts,
-            totalCompletions: dailyFunnel.completions,
-            totalDropoffs: dailyFunnel.starts - dailyFunnel.completions,
-            conversionRate: dailyConversionRate,
-          },
-        });
-      } else {
-        await prisma.funnelAnalytics.create({
-          data: {
-            funnelId: funnel.id,
-            date: analyticsDate,
-            totalStarts: dailyFunnel.starts,
-            totalCompletions: dailyFunnel.completions,
-            totalDropoffs: dailyFunnel.starts - dailyFunnel.completions,
-            conversionRate: dailyConversionRate,
-          },
-        });
-      }
+      await prisma.funnelAnalytics.create({
+        data: {
+          funnelId: funnel.id,
+          date: analyticsDate,
+          totalStarts: dailyFunnel.starts,
+          totalCompletions: dailyFunnel.completions,
+          totalDropoffs: dailyFunnel.starts - dailyFunnel.completions,
+          conversionRate: dailyConversionRate,
+        },
+      });
     }
 
     const duration = Date.now() - startTime;

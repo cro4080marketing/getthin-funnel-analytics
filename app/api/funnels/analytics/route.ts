@@ -20,8 +20,10 @@ export async function GET(request: NextRequest) {
     const endParam = searchParams.get('endDate');
 
     if (startParam && endParam) {
-      startDate = startOfDay(new Date(startParam));
-      endDate = endOfDay(new Date(endParam));
+      // Client sends date-only strings (YYYY-MM-DD). Convert to UTC midnight
+      // range to match how the sync stores dates (UTC midnight per day).
+      startDate = new Date(`${startParam}T00:00:00.000Z`);
+      endDate = new Date(`${endParam}T23:59:59.999Z`);
     } else {
       const days = parseInt(searchParams.get('days') || '30', 10);
       endDate = endOfDay(new Date());

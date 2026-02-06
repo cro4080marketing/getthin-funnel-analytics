@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { subDays, startOfDay, endOfDay } from 'date-fns';
+import { subDays, startOfDay, endOfDay, format } from 'date-fns';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { DateRangePicker, DateRange } from '@/components/dashboard/date-range-picker';
 import { CustomMetricsRow, CustomMetric } from '@/components/dashboard/custom-metrics-row';
@@ -134,8 +134,13 @@ export default function DashboardPage() {
     setError(null);
 
     try {
+      // Send date-only strings (YYYY-MM-DD) to avoid timezone issues.
+      // The API stores dates at UTC midnight, so we match using date strings.
+      // Use format() (local time) not toISOString() (UTC) to get correct local dates.
+      const startStr = format(dateRange.startDate, 'yyyy-MM-dd');
+      const endStr = format(dateRange.endDate, 'yyyy-MM-dd');
       const analyticsRes = await fetch(
-        `/api/funnels/analytics?startDate=${dateRange.startDate.toISOString()}&endDate=${dateRange.endDate.toISOString()}`
+        `/api/funnels/analytics?startDate=${startStr}&endDate=${endStr}`
       );
       if (!analyticsRes.ok) {
         throw new Error('Failed to fetch analytics');
