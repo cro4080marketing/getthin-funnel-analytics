@@ -497,14 +497,20 @@ export function SettingsPanel({
             onClick={async () => {
               setSyncing(true)
               setSyncResult(null)
+              const controller = new AbortController()
+              const timeout = setTimeout(() => controller.abort(), 120_000) // 2-minute client timeout
               try {
-                const res = await fetch('/api/cron/sync-data')
+                const res = await fetch('/api/cron/sync-data', { signal: controller.signal })
+                clearTimeout(timeout)
                 const data = await res.json()
                 if (data.success) {
-                  setSyncResult({
-                    success: true,
-                    message: `Synced ${data.entriesProcessed} entries across ${data.daysProcessed} days. Starts: ${data.funnelMetrics?.totalStarts}, Completions: ${data.funnelMetrics?.totalCompletions}`,
-                  })
+                  const msg = data.partial
+                    ? `Partial sync: ${data.entriesProcessed} entries across ${data.daysProcessed} days. ${data.note}`
+                    : `Synced ${data.entriesProcessed} entries across ${data.daysProcessed} days.`
+                  const purchases = data.purchaseVerification
+                    ? ` Purchases: ${JSON.stringify(data.purchaseVerification)}`
+                    : ''
+                  setSyncResult({ success: true, message: msg + purchases })
                   onSyncComplete?.()
                 } else {
                   setSyncResult({
@@ -513,9 +519,13 @@ export function SettingsPanel({
                   })
                 }
               } catch (err) {
+                clearTimeout(timeout)
+                const isTimeout = err instanceof DOMException && err.name === 'AbortError'
                 setSyncResult({
                   success: false,
-                  message: err instanceof Error ? err.message : 'Network error',
+                  message: isTimeout
+                    ? 'Sync timed out after 2 minutes. The server may still be processing. Try refreshing the dashboard in a minute.'
+                    : (err instanceof Error ? err.message : 'Network error'),
                 })
               } finally {
                 setSyncing(false)

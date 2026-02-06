@@ -69,13 +69,25 @@ export async function GET(request: NextRequest) {
     console.log(`[Sync] Using API key: ${apiKey.substring(0, 4)}... (${apiKey.length} chars)`);
     console.log(`[Sync] Project: ${projectId}, Embeddable filter: ${embeddableId || 'none'}`);
 
-    // Fetch ALL entries from Embeddables API with pagination
+    // Fetch entries from Embeddables API with pagination
+    // Time-limited: stop fetching after 90 seconds and process what we have.
+    // This prevents timeouts on Railway (which may kill requests after 2-5 mins).
     const entries: EmbeddablesEntry[] = [];
     let offset = 0;
     const limit = 1000;
     let hasMore = true;
+    const fetchDeadline = Date.now() + 90_000; // 90 second fetch budget
+    let stoppedEarly = false;
 
     while (hasMore) {
+      // Check time budget before next API call
+      if (Date.now() > fetchDeadline) {
+        console.log(`[Sync] Reached 90s fetch time limit at offset ${offset}. Processing ${entries.length} entries.`);
+        stoppedEarly = true;
+        hasMore = false;
+        break;
+      }
+
       const response = await fetch(
         `https://api.embeddables.com/projects/${projectId}/entries-page-views?limit=${limit}&offset=${offset}`,
         {
@@ -441,6 +453,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      partial: stoppedEarly,
       entriesProcessed,
       stepsProcessed,
       daysProcessed: dailyFunnelData.size,
@@ -456,6 +469,7 @@ export async function GET(request: NextRequest) {
         pagesWithNoData: pagesWithNoData.length > 0 ? pagesWithNoData : 'all pages have data',
       },
       duration,
+      ...(stoppedEarly ? { note: `Fetched ${entriesProcessed} entries in 90s. Run sync again or via cron for remaining historical data.` } : {}),
     });
   } catch (error) {
     const duration = Date.now() - startTime;
