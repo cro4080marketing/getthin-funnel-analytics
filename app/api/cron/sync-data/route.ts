@@ -83,7 +83,14 @@ export async function GET(request: NextRequest) {
       const batch: EmbeddablesEntry[] = await response.json();
       console.log(`[Sync] Fetched batch of ${batch.length} entries (offset: ${offset})`);
 
-      entries.push(...batch);
+      // Filter each batch immediately to reduce memory usage
+      if (embeddableId) {
+        const filtered = batch.filter((e: EmbeddablesEntry) => e.embeddable_id === embeddableId);
+        entries.push(...filtered);
+        console.log(`[Sync] Batch filtered: ${batch.length} -> ${filtered.length} (embeddable: ${embeddableId})`);
+      } else {
+        entries.push(...batch);
+      }
 
       // If we got fewer than limit, we've reached the end
       if (batch.length < limit) {
@@ -92,24 +99,14 @@ export async function GET(request: NextRequest) {
         offset += limit;
       }
 
-      // Safety limit to prevent infinite loops (max 10,000 entries)
-      if (offset >= 10000) {
-        console.log('[Sync] Reached safety limit of 10,000 entries');
+      // Safety limit to prevent infinite loops (max 100,000 entries)
+      if (offset >= 100000) {
+        console.log('[Sync] Reached safety limit of 100,000 entries');
         hasMore = false;
       }
     }
 
-    console.log(`[Sync] Total entries fetched: ${entries.length}`);
-
-    // Filter by embeddable_id if configured - the API returns entries from ALL
-    // embeddables in the project, but we only want one specific questionnaire
-    if (embeddableId) {
-      const beforeFilter = entries.length;
-      const filtered = entries.filter((e: EmbeddablesEntry) => e.embeddable_id === embeddableId);
-      console.log(`[Sync] Filtered by embeddable_id ${embeddableId}: ${beforeFilter} -> ${filtered.length} entries`);
-      entries.length = 0;
-      entries.push(...filtered);
-    }
+    console.log(`[Sync] Total entries after filtering: ${entries.length}`);
 
     if (entries.length === 0) {
       return NextResponse.json({
@@ -273,6 +270,54 @@ export async function GET(request: NextRequest) {
       }
 
       entriesProcessed++;
+    }
+
+    // Collect all unique page_keys with their typical index for ordering
+    const pageKeyIndexMap = new Map<string, number>();
+    for (const [, dailySteps] of dailyStepData) {
+      for (const pageKey of dailySteps.keys()) {
+        if (!pageKeyIndexMap.has(pageKey)) {
+          // Find the typical page_index for this key from any entry
+          for (const entry of entries) {
+            const pv = entry.page_views?.find(p => p.page_key === pageKey);
+            if (pv) {
+              pageKeyIndexMap.set(pageKey, pv.page_index);
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // Auto-create FunnelStep records for API keys not in our 55 definitions
+    const existingStepKeys = new Set(FUNNEL_PAGES.map(p => p.pageKey));
+    let nextStepNumber = FUNNEL_PAGES.length + 1;
+    for (const [pageKey, apiIndex] of pageKeyIndexMap) {
+      if (!existingStepKeys.has(pageKey)) {
+        const stepName = pageKey
+          .split('_')
+          .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(' ');
+        await prisma.funnelStep.upsert({
+          where: {
+            funnelId_stepNumber: {
+              funnelId: funnel.id,
+              stepNumber: 1000 + apiIndex, // Use 1000+ offset for auto-created steps
+            },
+          },
+          create: {
+            funnelId: funnel.id,
+            stepNumber: 1000 + apiIndex,
+            stepName,
+            stepKey: pageKey,
+          },
+          update: {
+            stepName,
+            stepKey: pageKey,
+          },
+        });
+        nextStepNumber++;
+      }
     }
 
     // Build a map of stepKey -> stepId for quick lookup

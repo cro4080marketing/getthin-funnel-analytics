@@ -9,7 +9,7 @@ import { AreaTrendChart } from '@/components/dashboard/area-trend-chart';
 import { QuickStats } from '@/components/dashboard/quick-stats';
 import { VerticalFunnelChart } from '@/components/dashboard/vertical-funnel-chart';
 import { FunnelFilters } from '@/components/dashboard/funnel-filters';
-import { CollapsibleStepGroups } from '@/components/dashboard/collapsible-step-group';
+// CollapsibleStepGroups replaced with flat step table
 import { AlertsPanel } from '@/components/dashboard/alerts-panel';
 import { SettingsPanel } from '@/components/dashboard/settings-panel';
 import { Button } from '@/components/ui/button';
@@ -56,13 +56,22 @@ interface AlertSummary {
   warnings: number;
 }
 
+// Custom conversion supports single stepKey or multiple stepKeys (formula = sum)
+interface CustomConversion {
+  id: string;
+  name: string;
+  stepKey?: string;       // Single step (backward compat)
+  stepKeys?: string[];    // Multiple steps (formula: sum of entries)
+  stepName: string;
+}
+
 // Default custom conversions (user can customize these)
-const DEFAULT_CUSTOM_CONVERSIONS = [
-  { id: '1', name: 'Unique Users', stepKey: 'current_height_and_weight', stepName: 'Current Height and Weight' },
-  { id: '2', name: 'Quiz Started', stepKey: 'current_height_and_weight', stepName: 'Current Height and Weight' },
-  { id: '3', name: 'Lead Capture', stepKey: 'lead_capture', stepName: 'Lead Capture' },
-  { id: '4', name: 'Checkout Viewed', stepKey: 'macro_checkout', stepName: 'Macro Checkout' },
-  { id: '5', name: 'Purchase Complete', stepKey: 'payment_successful', stepName: 'Payment Successful' },
+const DEFAULT_CUSTOM_CONVERSIONS: CustomConversion[] = [
+  { id: '1', name: 'Unique Users', stepKeys: ['current_height_and_weight'], stepName: 'Current Height and Weight' },
+  { id: '2', name: 'Quiz Started', stepKeys: ['current_height_and_weight'], stepName: 'Current Height and Weight' },
+  { id: '3', name: 'Lead Capture', stepKeys: ['lead_capture'], stepName: 'Lead Capture' },
+  { id: '4', name: 'Checkout Viewed', stepKeys: ['macro_checkout'], stepName: 'Macro Checkout' },
+  { id: '5', name: 'Purchase Complete', stepKeys: ['asnyc_confirmation_to_redirect', 'submission_review'], stepName: 'Async Confirmation + Submission Review' },
 ];
 
 // Default starred steps (key conversion points)
@@ -82,30 +91,6 @@ const DEFAULT_ALERT_THRESHOLDS = {
   conversionAlert: 5,
 };
 
-// Group steps by category
-function groupStepsByCategory(steps: AnalyticsData['steps']) {
-  const categoryNames: Record<string, string> = {
-    question: 'Questions',
-    health: 'Health Screening',
-    interstitial: 'Interstitials',
-    social_proof: 'Social Proof',
-    conversion: 'Conversion Points',
-    checkout: 'Checkout',
-    dq: 'Disqualification',
-  };
-
-  const categoryOrder = ['question', 'health', 'interstitial', 'social_proof', 'conversion', 'checkout', 'dq'];
-
-  const groups = categoryOrder
-    .map(category => ({
-      name: categoryNames[category] || category,
-      category,
-      steps: steps.filter(s => s.category === category),
-    }))
-    .filter(g => g.steps.length > 0);
-
-  return groups;
-}
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState('overview');
@@ -219,8 +204,12 @@ export default function DashboardPage() {
     const totalUsers = firstStep?.entries || 0;
 
     return customConversions.map((conv) => {
-      const step = analytics.steps.find(s => s.stepKey === conv.stepKey);
-      const entries = step?.entries || 0;
+      // Support both single stepKey and multiple stepKeys (formula = sum)
+      const keys = conv.stepKeys || (conv.stepKey ? [conv.stepKey] : []);
+      const entries = keys.reduce((sum, key) => {
+        const step = analytics.steps.find(s => s.stepKey === key);
+        return sum + (step?.entries || 0);
+      }, 0);
       const percentage = totalUsers > 0 ? (entries / totalUsers) * 100 : 0;
 
       return {
@@ -228,7 +217,7 @@ export default function DashboardPage() {
         label: conv.name,
         value: entries,
         percentage: conv.id === '1' ? undefined : percentage,
-        stepKey: conv.stepKey,
+        stepKey: keys[0],
       };
     });
   }, [analytics, customConversions]);
@@ -283,12 +272,6 @@ export default function DashboardPage() {
     }));
   }, [analytics, starredSteps]);
 
-  // Group steps for collapsible view
-  const stepGroups = useMemo(() => {
-    if (!stepsWithStarred.length) return [];
-    return groupStepsByCategory(stepsWithStarred);
-  }, [stepsWithStarred]);
-
   // Available steps for settings
   const availableSteps = useMemo(() => {
     return FUNNEL_PAGES.map(p => ({
@@ -319,14 +302,14 @@ export default function DashboardPage() {
   }, [analytics, alertThresholds]);
 
   // Custom conversion CRUD handlers
-  const addConversion = useCallback((conv: Omit<typeof customConversions[0], 'id'>) => {
+  const addConversion = useCallback((conv: Omit<CustomConversion, 'id'>) => {
     setCustomConversions(prev => [
       ...prev,
       { ...conv, id: String(Date.now()) },
     ]);
   }, []);
 
-  const editConversion = useCallback((id: string, conv: Omit<typeof customConversions[0], 'id'>) => {
+  const editConversion = useCallback((id: string, conv: Omit<CustomConversion, 'id'>) => {
     setCustomConversions(prev =>
       prev.map(c => c.id === id ? { ...c, ...conv } : c)
     );
@@ -473,13 +456,50 @@ export default function DashboardPage() {
               displayMode={displayMode}
             />
 
-            {/* Collapsible Step Groups */}
-            <CollapsibleStepGroups
-              groups={stepGroups}
-              loading={loading}
-              showStarredOnly={showStarredOnly}
-              onToggleStar={toggleStarredStep}
-            />
+            {/* Flat Step-by-Step Breakdown (in flow order) */}
+            {!loading && stepsWithStarred.length > 0 && (
+              <div className="rounded-lg border bg-white overflow-hidden">
+                <div className="p-4 border-b bg-gray-50">
+                  <h3 className="font-semibold text-gray-900">Step-by-Step Breakdown</h3>
+                  <p className="text-sm text-gray-500 mt-0.5">Steps in funnel flow order</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-gray-50 text-gray-600">
+                        <th className="text-left px-4 py-2 font-medium">#</th>
+                        <th className="text-left px-4 py-2 font-medium">Step</th>
+                        <th className="text-right px-4 py-2 font-medium">Contacts</th>
+                        <th className="text-right px-4 py-2 font-medium">Drop-off</th>
+                        <th className="text-right px-4 py-2 font-medium">% of Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(showStarredOnly ? stepsWithStarred.filter(s => s.isStarred) : stepsWithStarred)
+                        .map((step, idx) => {
+                          const totalUsers = stepsWithStarred[0]?.entries || 1;
+                          const pctTotal = ((step.entries / totalUsers) * 100).toFixed(1);
+                          return (
+                            <tr key={step.stepKey} className="border-b last:border-b-0 hover:bg-gray-50">
+                              <td className="px-4 py-2.5 text-gray-400">{idx + 1}</td>
+                              <td className="px-4 py-2.5 font-medium text-gray-900">{step.stepName}</td>
+                              <td className="px-4 py-2.5 text-right text-gray-900">{step.entries.toLocaleString()}</td>
+                              <td className={`px-4 py-2.5 text-right font-medium ${
+                                step.dropOffRate > 40 ? 'text-red-600' :
+                                step.dropOffRate > 25 ? 'text-amber-600' : 'text-gray-600'
+                              }`}>
+                                {step.dropOffRate.toFixed(1)}%
+                              </td>
+                              <td className="px-4 py-2.5 text-right text-gray-600">{pctTotal}%</td>
+                            </tr>
+                          );
+                        })
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </TabsContent>
 
           {/* Alerts Tab */}

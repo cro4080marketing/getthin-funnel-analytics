@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils"
 interface CustomConversion {
   id: string
   name: string
-  stepKey: string
+  stepKey?: string        // Single step (backward compat)
+  stepKeys?: string[]     // Multiple steps (formula = sum)
   stepName: string
 }
 
@@ -30,6 +31,77 @@ interface SettingsPanelProps {
   onToggleStarredStep?: (stepKey: string) => void
   onSyncComplete?: () => void
   className?: string
+}
+
+function ConversionForm({
+  formName,
+  setFormName,
+  formStepKeys,
+  toggleStepInFormula,
+  availableSteps,
+  onSave,
+  onCancel,
+  saveLabel,
+}: {
+  formName: string
+  setFormName: (v: string) => void
+  formStepKeys: string[]
+  toggleStepInFormula: (key: string) => void
+  availableSteps: Array<{ stepKey: string; stepName: string; stepNumber: number }>
+  onSave: () => void
+  onCancel: () => void
+  saveLabel: string
+}) {
+  return (
+    <div className="p-3 rounded-lg border-2 border-violet-200 bg-violet-50 space-y-3">
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+        <input
+          type="text"
+          value={formName}
+          onChange={(e) => setFormName(e.target.value)}
+          placeholder="e.g. Purchase Complete"
+          className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-violet-500"
+          autoFocus
+        />
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Steps {formStepKeys.length > 1 && <span className="text-violet-600">(formula: sum of {formStepKeys.length} steps)</span>}
+        </label>
+        <div className="max-h-48 overflow-y-auto border rounded-lg bg-white p-2 space-y-1">
+          {availableSteps.map((step) => {
+            const isSelected = formStepKeys.includes(step.stepKey)
+            return (
+              <label
+                key={step.stepKey}
+                className={cn(
+                  "flex items-center gap-2 px-2 py-1.5 rounded text-sm cursor-pointer transition-colors",
+                  isSelected ? "bg-violet-50 text-violet-900" : "hover:bg-gray-50 text-gray-700"
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => toggleStepInFormula(step.stepKey)}
+                  className="rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                />
+                <span className="truncate">{step.stepNumber}. {step.stepName}</span>
+              </label>
+            )
+          })}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 justify-end">
+        <Button variant="outline" size="sm" onClick={onCancel}>
+          <X className="h-3.5 w-3.5 mr-1" /> Cancel
+        </Button>
+        <Button size="sm" onClick={onSave} disabled={!formName.trim() || formStepKeys.length === 0} className="bg-violet-600 hover:bg-violet-700">
+          <Check className="h-3.5 w-3.5 mr-1" /> {saveLabel}
+        </Button>
+      </div>
+    </div>
+  )
 }
 
 export function SettingsPanel({
@@ -54,45 +126,54 @@ export function SettingsPanel({
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [formName, setFormName] = useState("")
-  const [formStepKey, setFormStepKey] = useState("")
+  const [formStepKeys, setFormStepKeys] = useState<string[]>([])
 
   const resetForm = () => {
     setShowForm(false)
     setEditingId(null)
     setFormName("")
-    setFormStepKey("")
+    setFormStepKeys([])
   }
 
   const startAdd = () => {
     setEditingId(null)
     setFormName("")
-    setFormStepKey(availableSteps[0]?.stepKey || "")
+    setFormStepKeys([availableSteps[0]?.stepKey || ""])
     setShowForm(true)
   }
 
   const startEdit = (conv: CustomConversion) => {
     setEditingId(conv.id)
     setFormName(conv.name)
-    setFormStepKey(conv.stepKey)
+    setFormStepKeys(conv.stepKeys || (conv.stepKey ? [conv.stepKey] : []))
     setShowForm(true)
   }
 
+  const toggleStepInFormula = (stepKey: string) => {
+    setFormStepKeys(prev =>
+      prev.includes(stepKey)
+        ? prev.filter(k => k !== stepKey)
+        : [...prev, stepKey]
+    )
+  }
+
   const saveForm = () => {
-    if (!formName.trim() || !formStepKey) return
-    const step = availableSteps.find(s => s.stepKey === formStepKey)
-    if (!step) return
+    if (!formName.trim() || formStepKeys.length === 0) return
+    const stepNames = formStepKeys
+      .map(k => availableSteps.find(s => s.stepKey === k)?.stepName || k)
+      .join(' + ')
 
     if (editingId) {
       onEditConversion?.(editingId, {
         name: formName.trim(),
-        stepKey: formStepKey,
-        stepName: step.stepName,
+        stepKeys: formStepKeys,
+        stepName: stepNames,
       })
     } else {
       onAddConversion?.({
         name: formName.trim(),
-        stepKey: formStepKey,
-        stepName: step.stepName,
+        stepKeys: formStepKeys,
+        stepName: stepNames,
       })
     }
     resetForm()
@@ -120,41 +201,17 @@ export function SettingsPanel({
           ) : (
             customConversions.map((conv) => (
               editingId === conv.id && showForm ? (
-                <div key={conv.id} className="p-3 rounded-lg border-2 border-violet-200 bg-violet-50 space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                    <input
-                      type="text"
-                      value={formName}
-                      onChange={(e) => setFormName(e.target.value)}
-                      placeholder="e.g. Lead Capture"
-                      className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-violet-500"
-                      autoFocus
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Step</label>
-                    <select
-                      value={formStepKey}
-                      onChange={(e) => setFormStepKey(e.target.value)}
-                      className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-violet-500"
-                    >
-                      {availableSteps.map((step) => (
-                        <option key={step.stepKey} value={step.stepKey}>
-                          {step.stepNumber}. {step.stepName}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex items-center gap-2 justify-end">
-                    <Button variant="outline" size="sm" onClick={resetForm}>
-                      <X className="h-3.5 w-3.5 mr-1" /> Cancel
-                    </Button>
-                    <Button size="sm" onClick={saveForm} disabled={!formName.trim()} className="bg-violet-600 hover:bg-violet-700">
-                      <Check className="h-3.5 w-3.5 mr-1" /> Save
-                    </Button>
-                  </div>
-                </div>
+                <ConversionForm
+                  key={conv.id}
+                  formName={formName}
+                  setFormName={setFormName}
+                  formStepKeys={formStepKeys}
+                  toggleStepInFormula={toggleStepInFormula}
+                  availableSteps={availableSteps}
+                  onSave={saveForm}
+                  onCancel={resetForm}
+                  saveLabel="Save"
+                />
               ) : (
                 <div
                   key={conv.id}
@@ -163,7 +220,10 @@ export function SettingsPanel({
                   <GripVertical className="h-4 w-4 text-gray-400 cursor-grab" />
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-gray-900 truncate">{conv.name}</p>
-                    <p className="text-sm text-gray-500 truncate">Step: {conv.stepName}</p>
+                    <p className="text-sm text-gray-500 truncate">
+                      {(conv.stepKeys?.length || 0) > 1 ? 'Formula: ' : 'Step: '}
+                      {conv.stepName}
+                    </p>
                   </div>
                   <div className="flex items-center gap-1">
                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => startEdit(conv)}>
@@ -185,41 +245,16 @@ export function SettingsPanel({
 
           {/* Inline add form */}
           {showForm && !editingId && (
-            <div className="p-3 rounded-lg border-2 border-violet-200 bg-violet-50 space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                <input
-                  type="text"
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                  placeholder="e.g. Lead Capture"
-                  className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-violet-500"
-                  autoFocus
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Step</label>
-                <select
-                  value={formStepKey}
-                  onChange={(e) => setFormStepKey(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-violet-500"
-                >
-                  {availableSteps.map((step) => (
-                    <option key={step.stepKey} value={step.stepKey}>
-                      {step.stepNumber}. {step.stepName}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex items-center gap-2 justify-end">
-                <Button variant="outline" size="sm" onClick={resetForm}>
-                  <X className="h-3.5 w-3.5 mr-1" /> Cancel
-                </Button>
-                <Button size="sm" onClick={saveForm} disabled={!formName.trim()} className="bg-violet-600 hover:bg-violet-700">
-                  <Check className="h-3.5 w-3.5 mr-1" /> Add
-                </Button>
-              </div>
-            </div>
+            <ConversionForm
+              formName={formName}
+              setFormName={setFormName}
+              formStepKeys={formStepKeys}
+              toggleStepInFormula={toggleStepInFormula}
+              availableSteps={availableSteps}
+              onSave={saveForm}
+              onCancel={resetForm}
+              saveLabel="Add"
+            />
           )}
 
           {!showForm && (

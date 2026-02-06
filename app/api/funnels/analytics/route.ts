@@ -183,6 +183,7 @@ export async function GET(request: NextRequest) {
         abandonmentRate: totalStarts > 0 ? Number((((totalStarts - totalCompletions) / totalStarts) * 100).toFixed(2)) : 0,
       },
       steps: Array.from(stepMetrics.values())
+        .filter(step => step.entries > 0) // Only return steps with actual data
         .sort((a, b) => a.stepNumber - b.stepNumber)
         .map(step => ({
           stepNumber: step.stepNumber,
