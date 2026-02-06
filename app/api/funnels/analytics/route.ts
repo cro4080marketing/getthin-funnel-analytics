@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/db/prisma';
-import { subDays, startOfDay, endOfDay, format, eachDayOfInterval } from 'date-fns';
+import { subDays, startOfDay, endOfDay, eachDayOfInterval } from 'date-fns';
+
+// Format a Date to YYYY-MM-DD using UTC components (not local time)
+function formatUTC(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -149,11 +154,11 @@ export async function GET(request: NextRequest) {
     // Build trends from funnel analytics
     const dateRange = eachDayOfInterval({ start: startDate, end: endDate });
     const analyticsMap = new Map(
-      funnelAnalytics.map(a => [format(a.date, 'yyyy-MM-dd'), a])
+      funnelAnalytics.map(a => [formatUTC(a.date), a])
     );
 
     const trends = dateRange.map(date => {
-      const dateKey = format(date, 'yyyy-MM-dd');
+      const dateKey = formatUTC(date);
       const analytics = analyticsMap.get(dateKey);
       return {
         date: dateKey,
@@ -167,8 +172,8 @@ export async function GET(request: NextRequest) {
       success: true,
       totalEntries: totalStarts, // For dashboard "no data" check
       dateRange: {
-        start: format(startDate, 'yyyy-MM-dd'),
-        end: format(endDate, 'yyyy-MM-dd'),
+        start: formatUTC(startDate),
+        end: formatUTC(endDate),
       },
       funnel: {
         id: funnel.id,

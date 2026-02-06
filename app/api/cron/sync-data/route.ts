@@ -56,8 +56,19 @@ export async function GET(request: NextRequest) {
     const embeddableId = process.env.EMBEDDABLES_EMBEDDABLE_ID;
 
     if (!apiKey || !projectId) {
-      throw new Error('EMBEDDABLES_API_KEY or EMBEDDABLES_PROJECT_ID not configured');
+      return NextResponse.json({
+        success: false,
+        error: 'Missing environment variables',
+        diagnostics: {
+          EMBEDDABLES_API_KEY: apiKey ? `set (${apiKey.length} chars, starts with ${apiKey.substring(0, 4)}...)` : 'NOT SET',
+          EMBEDDABLES_PROJECT_ID: projectId ? `set (${projectId})` : 'NOT SET',
+          EMBEDDABLES_EMBEDDABLE_ID: embeddableId || 'NOT SET (will fetch all embeddables)',
+        },
+      }, { status: 500 });
     }
+
+    console.log(`[Sync] Using API key: ${apiKey.substring(0, 4)}... (${apiKey.length} chars)`);
+    console.log(`[Sync] Project: ${projectId}, Embeddable filter: ${embeddableId || 'none'}`);
 
     // Fetch ALL entries from Embeddables API with pagination
     const entries: EmbeddablesEntry[] = [];
@@ -77,7 +88,19 @@ export async function GET(request: NextRequest) {
       );
 
       if (!response.ok) {
-        throw new Error(`Embeddables API error: ${response.status} ${response.statusText}`);
+        const errorBody = await response.text().catch(() => 'no body');
+        return NextResponse.json({
+          success: false,
+          error: `Embeddables API error: ${response.status} ${response.statusText}`,
+          diagnostics: {
+            EMBEDDABLES_API_KEY: `set (${apiKey.length} chars, starts with ${apiKey.substring(0, 4)}...)`,
+            EMBEDDABLES_PROJECT_ID: projectId,
+            apiResponse: errorBody.substring(0, 500),
+            hint: response.status === 401
+              ? 'The API key is being rejected. Check that EMBEDDABLES_API_KEY is correct in your Railway environment variables.'
+              : 'Check the Embeddables API status.',
+          },
+        }, { status: 502 });
       }
 
       const batch: EmbeddablesEntry[] = await response.json();
@@ -290,9 +313,11 @@ export async function GET(request: NextRequest) {
     }
 
     // Auto-create FunnelStep records for API keys not in our 55 definitions
+    // Use sequential numbering starting at 1000 to avoid collisions
+    // (two page_keys can share the same page_index due to conditional branching)
     const existingStepKeys = new Set(FUNNEL_PAGES.map(p => p.pageKey));
-    let nextStepNumber = FUNNEL_PAGES.length + 1;
-    for (const [pageKey, apiIndex] of pageKeyIndexMap) {
+    let autoStepNumber = 1000;
+    for (const [pageKey] of pageKeyIndexMap) {
       if (!existingStepKeys.has(pageKey)) {
         const stepName = pageKey
           .split('_')
@@ -302,12 +327,12 @@ export async function GET(request: NextRequest) {
           where: {
             funnelId_stepNumber: {
               funnelId: funnel.id,
-              stepNumber: 1000 + apiIndex, // Use 1000+ offset for auto-created steps
+              stepNumber: autoStepNumber,
             },
           },
           create: {
             funnelId: funnel.id,
-            stepNumber: 1000 + apiIndex,
+            stepNumber: autoStepNumber,
             stepName,
             stepKey: pageKey,
           },
@@ -316,7 +341,7 @@ export async function GET(request: NextRequest) {
             stepKey: pageKey,
           },
         });
-        nextStepNumber++;
+        autoStepNumber++;
       }
     }
 

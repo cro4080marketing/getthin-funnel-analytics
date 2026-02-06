@@ -164,12 +164,13 @@ export default function DashboardPage() {
       const analyticsData = await analyticsRes.json();
 
       // Enrich steps with category from funnel pages
+      // IMPORTANT: Use the stepKey returned by the API (from database), do NOT override it.
+      // Overriding by stepNumber breaks auto-created steps (stepNumber != pageNumber for those).
       if (analyticsData.steps) {
         analyticsData.steps = analyticsData.steps.map((step: any) => {
-          const pageInfo = FUNNEL_PAGES.find(p => p.pageNumber === step.stepNumber);
+          const pageInfo = FUNNEL_PAGES.find(p => p.pageKey === step.stepKey);
           return {
             ...step,
-            stepKey: pageInfo?.pageKey || `step_${step.stepNumber}`,
             category: pageInfo?.category || 'question',
           };
         });

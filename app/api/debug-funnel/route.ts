@@ -11,7 +11,13 @@ export async function GET() {
   const projectId = process.env.EMBEDDABLES_PROJECT_ID;
 
   if (!apiKey || !projectId) {
-    return NextResponse.json({ error: 'API not configured' }, { status: 500 });
+    return NextResponse.json({
+      error: 'API not configured',
+      diagnostics: {
+        EMBEDDABLES_API_KEY: apiKey ? `set (${apiKey.length} chars)` : 'NOT SET',
+        EMBEDDABLES_PROJECT_ID: projectId || 'NOT SET',
+      },
+    }, { status: 500 });
   }
 
   const response = await fetch(
@@ -25,7 +31,18 @@ export async function GET() {
   );
 
   if (!response.ok) {
-    return NextResponse.json({ error: 'API error' }, { status: 500 });
+    const errorBody = await response.text().catch(() => 'no body');
+    return NextResponse.json({
+      error: `Embeddables API error: ${response.status} ${response.statusText}`,
+      diagnostics: {
+        EMBEDDABLES_API_KEY: `set (${apiKey.length} chars, starts with ${apiKey.substring(0, 4)}...)`,
+        EMBEDDABLES_PROJECT_ID: projectId,
+        apiResponse: errorBody.substring(0, 500),
+        hint: response.status === 401
+          ? 'API key rejected. Verify EMBEDDABLES_API_KEY in Railway environment variables.'
+          : undefined,
+      },
+    }, { status: 502 });
   }
 
   let entries = await response.json();

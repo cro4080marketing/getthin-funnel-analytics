@@ -68,7 +68,7 @@ export const FUNNEL_PAGES: FunnelPageDefinition[] = [
   { pageNumber: 52, pageKey: 'micro_checkout', pageName: 'Micro Checkout', category: 'checkout', isConversionPoint: true },
   { pageNumber: 53, pageKey: 'payment_successful', pageName: 'Payment Successful', category: 'conversion', isPurchaseComplete: true },
   { pageNumber: 54, pageKey: 'asnyc_confirmation_to_redirect', pageName: 'Async Confirmation', category: 'conversion', isPurchaseComplete: true },
-  { pageNumber: 55, pageKey: 'calendar_page', pageName: 'Calendar Page', category: 'conversion' },
+  { pageNumber: 55, pageKey: 'calendar_page', pageName: 'Calendar Page', category: 'conversion', isPurchaseComplete: true },
 ];
 
 // Helper to get page by key
