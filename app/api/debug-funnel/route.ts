@@ -119,6 +119,44 @@ export async function GET() {
     .filter(p => !apiKeysSet.has(p.pageKey))
     .map(p => ({ pageNumber: p.pageNumber, pageKey: p.pageKey, pageName: p.pageName }));
 
+  // Investigate payment_successful: find entries that reached the furthest steps
+  // and show their complete page_key lists
+  const purchaseInvestigation: {
+    entriesReachingAsyncConfirm: number;
+    entriesReachingCalendar: number;
+    allKeysContainingPayment: string[];
+    sampleCompletedEntryKeys: string[][];
+  } = {
+    entriesReachingAsyncConfirm: 0,
+    entriesReachingCalendar: 0,
+    allKeysContainingPayment: [],
+    sampleCompletedEntryKeys: [],
+  };
+
+  const paymentKeySet = new Set<string>();
+  for (const entry of entries) {
+    const pvs = entry.page_views || [];
+    const keys = pvs.map((pv: any) => pv.page_key);
+
+    // Check for any key containing "pay" or "payment" or "success"
+    for (const k of keys) {
+      if (k && (k.includes('pay') || k.includes('purchase') || k.includes('success'))) {
+        paymentKeySet.add(k);
+      }
+    }
+
+    if (keys.includes('asnyc_confirmation_to_redirect')) {
+      purchaseInvestigation.entriesReachingAsyncConfirm++;
+      if (purchaseInvestigation.sampleCompletedEntryKeys.length < 3) {
+        purchaseInvestigation.sampleCompletedEntryKeys.push(keys);
+      }
+    }
+    if (keys.includes('calendar_page')) {
+      purchaseInvestigation.entriesReachingCalendar++;
+    }
+  }
+  purchaseInvestigation.allKeysContainingPayment = Array.from(paymentKeySet);
+
   return NextResponse.json({
     totalEntriesBeforeFilter: totalBeforeFilter,
     embeddableFilter: embeddableId || 'none (showing all)',
@@ -139,6 +177,7 @@ export async function GET() {
       totalDefinedPages: FUNNEL_PAGES.length,
       totalApiSteps: steps.length,
     },
+    purchaseInvestigation,
     sampleEntry: entries[0] ? {
       entry_id: entries[0].entry_id,
       page_views_count: entries[0].page_views?.length,

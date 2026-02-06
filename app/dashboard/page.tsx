@@ -71,7 +71,7 @@ const DEFAULT_CUSTOM_CONVERSIONS: CustomConversion[] = [
   { id: '2', name: 'Quiz Started', stepKeys: ['current_height_and_weight'], stepName: 'Current Height and Weight' },
   { id: '3', name: 'Lead Capture', stepKeys: ['lead_capture'], stepName: 'Lead Capture' },
   { id: '4', name: 'Checkout Viewed', stepKeys: ['macro_checkout'], stepName: 'Macro Checkout' },
-  { id: '5', name: 'Purchase Complete', stepKeys: ['asnyc_confirmation_to_redirect', 'submission_review'], stepName: 'Async Confirmation + Submission Review' },
+  { id: '5', name: 'Purchase Complete', stepKeys: ['asnyc_confirmation_to_redirect', 'calendar_page'], stepName: 'Async Confirmation + Calendar Page' },
 ];
 
 // Default starred steps (key conversion points)
