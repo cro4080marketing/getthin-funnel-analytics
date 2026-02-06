@@ -7,7 +7,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/db/prisma';
-import { startOfDay } from 'date-fns';
 
 export const runtime = 'nodejs';
 
@@ -66,7 +65,6 @@ export async function POST(request: NextRequest) {
       );
     }
     const entryId = payload.entryId || payload.id || payload.userId || `entry_${Date.now()}`;
-    const today = startOfDay(new Date());
 
     // Get or create funnel
     let funnel = await prisma.funnel.findFirst({
@@ -111,46 +109,11 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Update funnel analytics
-    const existingFunnelAnalytics = await prisma.funnelAnalytics.findFirst({
-      where: {
-        funnelId: funnel.id,
-        date: today,
-        hour: null,
-        deviceType: null,
-        browser: null,
-      },
-    });
-
-    if (existingFunnelAnalytics) {
-      // Calculate new totals
-      const newTotalStarts = existingFunnelAnalytics.totalStarts + 1;
-      const newTotalCompletions = existingFunnelAnalytics.totalCompletions + (isCompleted ? 1 : 0);
-      const newConversionRate = newTotalStarts > 0
-        ? (newTotalCompletions / newTotalStarts) * 100
-        : 0;
-
-      await prisma.funnelAnalytics.update({
-        where: { id: existingFunnelAnalytics.id },
-        data: {
-          totalStarts: newTotalStarts,
-          totalCompletions: newTotalCompletions,
-          totalDropoffs: newTotalStarts - newTotalCompletions,
-          conversionRate: newConversionRate,
-        },
-      });
-    } else {
-      await prisma.funnelAnalytics.create({
-        data: {
-          funnelId: funnel.id,
-          date: today,
-          totalStarts: 1,
-          totalCompletions: isCompleted ? 1 : 0,
-          totalDropoffs: 0,
-          conversionRate: isCompleted ? 100 : 0,
-        },
-      });
-    }
+    // NOTE: FunnelAnalytics is NOT updated here. The sync-data cron job is the
+    // authoritative source for analytics. The webhook previously incremented
+    // totalStarts by 1 per event, which caused inflated numbers when multiple
+    // webhook events fired per entry. The FunnelEntry upsert above is sufficient
+    // for tracking individual entries.
 
     console.log(`[Webhook] Successfully processed: ${eventType} for entry: ${entryId}`);
 

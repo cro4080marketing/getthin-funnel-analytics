@@ -28,7 +28,22 @@ export async function GET() {
     return NextResponse.json({ error: 'API error' }, { status: 500 });
   }
 
-  const entries = await response.json();
+  let entries = await response.json();
+
+  // Show embeddable_id distribution before filtering
+  const embeddableIds = new Map<string, number>();
+  for (const entry of entries) {
+    const id = entry.embeddable_id || 'unknown';
+    embeddableIds.set(id, (embeddableIds.get(id) || 0) + 1);
+  }
+  const embeddableDistribution = Object.fromEntries(embeddableIds);
+
+  // Filter by embeddable_id if configured
+  const embeddableId = process.env.EMBEDDABLES_EMBEDDABLE_ID;
+  const totalBeforeFilter = entries.length;
+  if (embeddableId) {
+    entries = entries.filter((e: any) => e.embeddable_id === embeddableId);
+  }
 
   // Analyze the funnel structure
   const stepMap = new Map<number, { key: string; count: number }>();
@@ -105,6 +120,9 @@ export async function GET() {
     .map(p => ({ pageNumber: p.pageNumber, pageKey: p.pageKey, pageName: p.pageName }));
 
   return NextResponse.json({
+    totalEntriesBeforeFilter: totalBeforeFilter,
+    embeddableFilter: embeddableId || 'none (showing all)',
+    embeddableDistribution,
     totalEntries: entries.length,
     completedWithProductData: completedCount,
     totalSteps: steps.length,

@@ -47,6 +47,7 @@ export async function GET(request: NextRequest) {
 
     const apiKey = process.env.EMBEDDABLES_API_KEY;
     const projectId = process.env.EMBEDDABLES_PROJECT_ID;
+    const embeddableId = process.env.EMBEDDABLES_EMBEDDABLE_ID;
 
     if (!apiKey || !projectId) {
       throw new Error('EMBEDDABLES_API_KEY or EMBEDDABLES_PROJECT_ID not configured');
@@ -93,6 +94,16 @@ export async function GET(request: NextRequest) {
     }
 
     console.log(`[Sync] Total entries fetched: ${entries.length}`);
+
+    // Filter by embeddable_id if configured - the API returns entries from ALL
+    // embeddables in the project, but we only want one specific questionnaire
+    if (embeddableId) {
+      const beforeFilter = entries.length;
+      const filtered = entries.filter((e: EmbeddablesEntry) => e.embeddable_id === embeddableId);
+      console.log(`[Sync] Filtered by embeddable_id ${embeddableId}: ${beforeFilter} -> ${filtered.length} entries`);
+      entries.length = 0;
+      entries.push(...filtered);
+    }
 
     if (entries.length === 0) {
       return NextResponse.json({

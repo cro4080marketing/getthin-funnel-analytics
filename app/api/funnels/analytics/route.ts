@@ -11,10 +11,22 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const days = parseInt(searchParams.get('days') || '30', 10);
 
-    const endDate = endOfDay(new Date());
-    const startDate = startOfDay(subDays(endDate, days));
+    // Accept explicit start/end dates from dashboard, or fall back to days parameter
+    let startDate: Date;
+    let endDate: Date;
+
+    const startParam = searchParams.get('startDate');
+    const endParam = searchParams.get('endDate');
+
+    if (startParam && endParam) {
+      startDate = startOfDay(new Date(startParam));
+      endDate = endOfDay(new Date(endParam));
+    } else {
+      const days = parseInt(searchParams.get('days') || '30', 10);
+      endDate = endOfDay(new Date());
+      startDate = startOfDay(subDays(endDate, days));
+    }
 
     // Get the main funnel
     const funnel = await prisma.funnel.findFirst({
