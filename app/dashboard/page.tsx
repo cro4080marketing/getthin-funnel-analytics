@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { subDays, startOfDay, endOfDay, format } from 'date-fns';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { DateRangePicker, DateRange } from '@/components/dashboard/date-range-picker';
@@ -124,10 +124,39 @@ export default function DashboardPage() {
   const [showStarredOnly, setShowStarredOnly] = useState(false);
   const [displayMode, setDisplayMode] = useState<'absolute' | 'percentage'>('absolute');
 
-  // Settings state (would normally be persisted)
-  const [customConversions, setCustomConversions] = useState(DEFAULT_CUSTOM_CONVERSIONS);
-  const [starredSteps, setStarredSteps] = useState<string[]>(DEFAULT_STARRED_STEPS);
-  const [alertThresholds, setAlertThresholds] = useState(DEFAULT_ALERT_THRESHOLDS);
+  // Settings state (persisted to localStorage)
+  const [customConversions, setCustomConversions] = useState<typeof DEFAULT_CUSTOM_CONVERSIONS>(() => {
+    if (typeof window === 'undefined') return DEFAULT_CUSTOM_CONVERSIONS;
+    try {
+      const saved = localStorage.getItem('funnel_custom_conversions');
+      return saved ? JSON.parse(saved) : DEFAULT_CUSTOM_CONVERSIONS;
+    } catch { return DEFAULT_CUSTOM_CONVERSIONS; }
+  });
+  const [starredSteps, setStarredSteps] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return DEFAULT_STARRED_STEPS;
+    try {
+      const saved = localStorage.getItem('funnel_starred_steps');
+      return saved ? JSON.parse(saved) : DEFAULT_STARRED_STEPS;
+    } catch { return DEFAULT_STARRED_STEPS; }
+  });
+  const [alertThresholds, setAlertThresholds] = useState(() => {
+    if (typeof window === 'undefined') return DEFAULT_ALERT_THRESHOLDS;
+    try {
+      const saved = localStorage.getItem('funnel_alert_thresholds');
+      return saved ? JSON.parse(saved) : DEFAULT_ALERT_THRESHOLDS;
+    } catch { return DEFAULT_ALERT_THRESHOLDS; }
+  });
+
+  // Persist settings to localStorage on change
+  useEffect(() => {
+    localStorage.setItem('funnel_custom_conversions', JSON.stringify(customConversions));
+  }, [customConversions]);
+  useEffect(() => {
+    localStorage.setItem('funnel_starred_steps', JSON.stringify(starredSteps));
+  }, [starredSteps]);
+  useEffect(() => {
+    localStorage.setItem('funnel_alert_thresholds', JSON.stringify(alertThresholds));
+  }, [alertThresholds]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -288,6 +317,24 @@ export default function DashboardPage() {
         status: 'active' as const,
       }));
   }, [analytics, alertThresholds]);
+
+  // Custom conversion CRUD handlers
+  const addConversion = useCallback((conv: Omit<typeof customConversions[0], 'id'>) => {
+    setCustomConversions(prev => [
+      ...prev,
+      { ...conv, id: String(Date.now()) },
+    ]);
+  }, []);
+
+  const editConversion = useCallback((id: string, conv: Omit<typeof customConversions[0], 'id'>) => {
+    setCustomConversions(prev =>
+      prev.map(c => c.id === id ? { ...c, ...conv } : c)
+    );
+  }, []);
+
+  const removeConversion = useCallback((id: string) => {
+    setCustomConversions(prev => prev.filter(c => c.id !== id));
+  }, []);
 
   const toggleStarredStep = (stepKey: string) => {
     setStarredSteps(prev =>
@@ -452,6 +499,9 @@ export default function DashboardPage() {
               starredSteps={starredSteps}
               alertThresholds={alertThresholds}
               availableSteps={availableSteps}
+              onAddConversion={addConversion}
+              onEditConversion={editConversion}
+              onRemoveConversion={removeConversion}
               onToggleStarredStep={toggleStarredStep}
               onUpdateThresholds={setAlertThresholds}
               onSyncComplete={fetchData}
