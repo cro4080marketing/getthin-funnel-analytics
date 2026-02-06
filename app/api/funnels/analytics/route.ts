@@ -167,7 +167,6 @@ export async function GET(request: NextRequest) {
       dateRange: {
         start: format(startDate, 'yyyy-MM-dd'),
         end: format(endDate, 'yyyy-MM-dd'),
-        days,
       },
       funnel: {
         id: funnel.id,
